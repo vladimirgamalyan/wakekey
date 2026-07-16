@@ -1,0 +1,67 @@
+# WakeKey
+
+A hardware key on ESP32-S3 that wakes a sleeping computer from Telegram.
+
+The device is plugged into a USB port and presents itself to the host as an
+ordinary USB keyboard. On command it emits a single keypress — the same event a
+real keyboard produces — and the host wakes from sleep. The command arrives over
+Telegram, so the computer can be woken from anywhere with network access, with
+no agent software installed on the host and nothing running on it while it
+sleeps.
+
+## Status
+
+Early. Design is settled; no firmware yet.
+
+## How it works
+
+1. The device connects to WiFi and polls the Telegram Bot API (`getUpdates`)
+   over HTTPS.
+2. An authorized user sends a wake command to the bot.
+3. The device emits a USB HID keypress to the host.
+4. The host wakes, exactly as it would from a physical keypress.
+
+Because the host sees a plain USB keyboard, waking works regardless of the
+operating system and requires no driver, service, or agent on the host side.
+
+## Hardware
+
+- An ESP32-S3 board with native USB (the S3's USB-OTG peripheral, not a
+  USB-to-UART bridge).
+- A host USB port that keeps power while the machine sleeps.
+
+## Host requirements
+
+Waking over USB must be permitted by the host — the device cannot force it:
+
+- USB wake enabled in BIOS/UEFI (often named *Wake on USB*, *USB Power in S3/S4*,
+  or *ErP* must be disabled).
+- Windows: Device Manager → the keyboard device → Power Management → *Allow this
+  device to wake the computer*.
+- The USB port must retain power in the target sleep state. On many desktops
+  only a subset of ports does.
+
+## Design decisions
+
+- [ADR-0001](docs/adr/0001-use-usb-hid-for-wake.md) — USB HID rather than BLE
+  HID, because Bluetooth wake support is uneven across hosts.
+- [ADR-0002](docs/adr/0002-poll-telegram-directly.md) — the device polls Telegram
+  directly rather than through a relay server, trading token exposure for having
+  no server to run.
+- [ADR-0003](docs/adr/0003-use-esp-idf-for-firmware.md) — ESP-IDF (C), for
+  direct control over TinyUSB, TLS, and NVS.
+
+Further decisions that shape structure or carry long-lived tradeoffs go in
+[`docs/adr/`](docs/adr/README.md).
+
+## Security
+
+Treat the device as physically trusted hardware:
+
+- The WiFi credentials and the Telegram bot token are stored on the device
+  (NVS). Anyone with physical access to it can potentially read them.
+- The bot must accept commands only from an allowlist of chat IDs. A Telegram
+  bot is reachable by anyone who knows its username, so an unrestricted bot is
+  an open wake button.
+- The device is a keyboard from the host's point of view. That is the same trust
+  boundary as leaving a keyboard plugged in.
