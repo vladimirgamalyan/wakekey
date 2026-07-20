@@ -1,4 +1,4 @@
-# WakeKey
+# RevRevRev
 
 A hardware key on ESP32-S3 that wakes a sleeping computer from Telegram.
 
@@ -8,6 +8,14 @@ real keyboard produces — and the host wakes from sleep. The command arrives ov
 Telegram, so the computer can be woken from anywhere with network access, with
 no agent software installed on the host and nothing running on it while it
 sleeps.
+
+## Name
+
+The name comes from the military wake-up call "Reveille! Reveille! Reveille!" —
+traditionally announced three times over a ship's or camp's PA system to rouse
+everyone. "Rev" is short for reveille, said three times: RevRevRev. Fitting,
+since waking a sleeping host is the device's only job. See
+[ADR-0005](docs/adr/0005-rename-to-revrevrev.md).
 
 ## Status
 
@@ -53,6 +61,8 @@ Waking over USB must be permitted by the host — the device cannot force it:
   direct control over TinyUSB, TLS, and NVS.
 - [ADR-0004](docs/adr/0004-compile-time-secrets-header.md) — credentials live in
   an uncommitted header for now; runtime provisioning is the intended successor.
+- [ADR-0005](docs/adr/0005-rename-to-revrevrev.md) — renamed from WakeKey to
+  RevRevRev.
 
 Further decisions that shape structure or carry long-lived tradeoffs go in
 [`docs/adr/`](docs/adr/README.md).

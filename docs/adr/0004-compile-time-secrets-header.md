@@ -17,8 +17,8 @@ Three options were weighed:
 3. **Runtime provisioning** over SoftAP or BLE, via the `wifi_provisioning`
    component.
 
-One fact reshapes the usual tradeoff: WakeKey is permanently plugged into a USB
-port of the very host it wakes, on the same port used to flash it. Reflashing is
+One fact reshapes the usual tradeoff: RevRevRev is permanently plugged into a
+USB port of the very host it wakes, on the same port used to flash it. Reflashing is
 therefore nearly free, which removes most of the value that (2) and (3) buy back
 in exchange for their extra machinery.
 
