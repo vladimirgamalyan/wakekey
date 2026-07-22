@@ -1,0 +1,8 @@
+# Custom single-app layout for the 2 MB flash. The default single_app table
+# caps the app at 1 MB, which the Telegram TLS stack nearly fills; this grows
+# the factory partition into the ~1 MB of flash that otherwise sits unused.
+# No OTA is used, so one factory app partition is all that is needed.
+# Name,     Type, SubType, Offset,   Size
+nvs,        data, nvs,     0x9000,   0x6000
+phy_init,   data, phy,     0xf000,   0x1000
+factory,    app,  factory, 0x10000,  0x1F0000

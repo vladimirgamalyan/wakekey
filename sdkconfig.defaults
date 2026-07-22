@@ -1,2 +1,8 @@
 # One HID interface (keyboard only).
 CONFIG_TINYUSB_HID_COUNT=1
+
+# Custom partition table: grow the app partition into the 2 MB flash (see
+# partitions.csv). The default single_app 1 MB is nearly full after the
+# Telegram TLS stack.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

@@ -59,6 +59,21 @@ this:
 
 ## 3. Telegram command path
 
+**Done, 2026-07-22.** The device long-polls `getUpdates` over HTTPS — TLS
+verified against the mbedTLS certificate bundle
+([ADR-0007](docs/adr/0007-verify-telegram-tls-with-cert-bundle.md)) rather than a
+pinned cert — parses updates with cJSON, and wakes on `/wake` from an allowlisted
+chat, replying with an acknowledgement. Verified live: an authorized `/wake`
+drove the wake action and its Telegram reply, with an onboard-LED blink as local
+confirmation. Two things are proven only at code level so far: the wake fired to
+an *awake* host, so the from-sleep leg still rests on step 2 — it runs the same
+`tud_remote_wakeup()` path proven there; and the unauthorized-chat rejection
+rests on the allowlist in `config_chat_allowed()`, not yet a second-account test.
+Credentials read through the single accessor in `config.c`
+([ADR-0004](docs/adr/0004-compile-time-secrets-header.md)), and the backlog is
+drained on boot (`offset=-1`) so a stale command cannot wake the host after a
+reboot.
+
 WiFi, then HTTPS long polling of `getUpdates` ([ADR-0002](docs/adr/0002-poll-telegram-directly.md)).
 
 The chat ID allowlist belongs here and is not optional — the bot is reachable by

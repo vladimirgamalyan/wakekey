@@ -21,7 +21,8 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "led_strip.h"
-#include "secrets.h"
+#include "config.h"
+#include "telegram.h"
 
 #define APP_BUTTON (GPIO_NUM_0) // BOOT button
 #define LED_GPIO (GPIO_NUM_48)  // Onboard WS2812 RGB LED
@@ -102,6 +103,10 @@ void tud_resume_cb(void)
 // should turn it off entirely during host sleep, where every mA counts.
 static led_strip_handle_t status_led;
 
+// Tracks the WiFi indicator state so a wake blink can restore the right color
+// afterwards. Written from the event task, read from the main task.
+static volatile bool s_wifi_connected;
+
 static void led_init(void)
 {
     led_strip_config_t strip_config = {
@@ -125,6 +130,30 @@ static void led_set(uint8_t r, uint8_t g, uint8_t b)
     led_strip_refresh(status_led);
 }
 
+// Restore the LED to the current WiFi indicator color.
+static void led_restore_status(void)
+{
+    if (s_wifi_connected) {
+        led_set(0, 2, 0); // green: connected
+    } else {
+        led_set(2, 0, 0); // red: not connected
+    }
+}
+
+// Brief blue flashes to confirm a wake command was received. A test aid; runs
+// in the main task after the wake is already triggered, then hands the LED back
+// to the WiFi status color.
+static void wake_blink(void)
+{
+    for (int i = 0; i < 3; i++) {
+        led_set(0, 0, 8); // blue
+        vTaskDelay(pdMS_TO_TICKS(80));
+        led_set(0, 0, 0); // off
+        vTaskDelay(pdMS_TO_TICKS(80));
+    }
+    led_restore_status();
+}
+
 /********* WiFi ***************/
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -133,11 +162,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGW(TAG, "WiFi disconnected, reconnecting");
+        s_wifi_connected = false;
         led_set(2, 0, 0); // red: not connected
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = data;
         ESP_LOGI(TAG, "Got IP " IPSTR, IP2STR(&event->ip_info.ip));
+        s_wifi_connected = true;
         led_set(0, 2, 0); // green: connected with an IP
     }
 }
@@ -154,8 +185,8 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL));
 
     wifi_config_t wifi_config = {0};
-    strncpy((char *)wifi_config.sta.ssid, WIFI_SSID, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char *)wifi_config.sta.password, WIFI_PASSWORD, sizeof(wifi_config.sta.password) - 1);
+    strncpy((char *)wifi_config.sta.ssid, config_wifi_ssid(), sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char *)wifi_config.sta.password, config_wifi_password(), sizeof(wifi_config.sta.password) - 1);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -170,12 +201,29 @@ static void wifi_start(void)
 
 static void send_wake_keypress(void)
 {
-    // Report ID 0: the report descriptor above declares no report ID, so the
-    // report must go out without an ID prefix byte.
-    uint8_t keycode[6] = {HID_KEY_A};
-    tud_hid_keyboard_report(0, 0, keycode);
+    // A lone left-Ctrl with no keycode: enough key activity to wake the host or
+    // its display, but it types nothing and toggles no lock state, so it is
+    // harmless even if a text field happens to be focused. Report ID 0 — the
+    // report descriptor above declares none, so no ID prefix byte.
+    tud_hid_keyboard_report(0, KEYBOARD_MODIFIER_LEFTCTRL, NULL);
     vTaskDelay(pdMS_TO_TICKS(20));
     tud_hid_keyboard_report(0, 0, NULL);
+}
+
+// The one wake action, driven by either trigger: the BOOT button (manual test)
+// or an authorized Telegram command. Runs only in the main task, so all USB
+// access stays single-threaded.
+static void trigger_wake(void)
+{
+    if (tud_suspended()) {
+        // The bus is asleep — an ordinary HID report would not be seen. This is
+        // the only path that can wake the host.
+        ESP_LOGI(TAG, "Bus suspended, requesting remote wakeup");
+        tud_remote_wakeup();
+    } else if (tud_mounted()) {
+        ESP_LOGI(TAG, "Sending wake keypress");
+        send_wake_keypress();
+    }
 }
 
 void app_main(void)
@@ -214,22 +262,25 @@ void app_main(void)
     ESP_LOGI(TAG, "WiFi bring-up");
     wifi_start();
 
+    ESP_LOGI(TAG, "Starting Telegram command path");
+    telegram_start();
+
     bool button_was_up = true;
     while (1) {
         bool button_is_up = gpio_get_level(APP_BUTTON);
         if (button_was_up && !button_is_up) {
-            // Falling edge: BOOT button just pressed.
-            if (tud_suspended()) {
-                // The bus is asleep — an ordinary HID report would not be
-                // seen. This is the only path that can wake the host.
-                ESP_LOGI(TAG, "Bus suspended, requesting remote wakeup");
-                tud_remote_wakeup();
-            } else if (tud_mounted()) {
-                ESP_LOGI(TAG, "Sending wake keypress");
-                send_wake_keypress();
-            }
+            // Falling edge: BOOT button just pressed (manual wake test).
+            trigger_wake();
         }
         button_was_up = button_is_up;
+
+        // Wake requested by an authorized Telegram command. Draining it here
+        // keeps every USB HID call in this one task. Wake first, then blink the
+        // LED as a visible confirmation the command arrived.
+        if (telegram_take_wake_request()) {
+            trigger_wake();
+            wake_blink();
+        }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

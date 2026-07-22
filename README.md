@@ -19,7 +19,9 @@ since waking a sleeping host is the device's only job. See
 
 ## Status
 
-Early. Design is settled; no firmware yet. Planned work, ordered by risk, is in
+Working prototype. The device wakes the host on a `/wake` command from an
+allowlisted Telegram chat. The main remaining work — runtime provisioning, to
+get credentials out of the firmware build — and the risk-ordered plan are in
 [ROADMAP.md](ROADMAP.md).
 
 ## How it works
@@ -65,6 +67,9 @@ Waking over USB must be permitted by the host — the device cannot force it:
   RevRevRev.
 - [ADR-0006](docs/adr/0006-stay-on-esp32s3-wifi.md) — stay on ESP32-S3 with
   WiFi; the ~20 mA idle draw is not worth switching to a lower-power radio.
+- [ADR-0007](docs/adr/0007-verify-telegram-tls-with-cert-bundle.md) — verify the
+  Telegram TLS connection against the mbedTLS certificate bundle, not a pinned
+  certificate.
 
 Further decisions that shape structure or carry long-lived tradeoffs go in
 [`docs/adr/`](docs/adr/README.md).
