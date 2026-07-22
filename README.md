@@ -1,5 +1,7 @@
 # RevRevRev
 
+![RevRevRev — wake your computer anytime, from anywhere](docs/hero.png)
+
 Wake a sleeping computer from Telegram.
 
 An ESP32-S3 sits in a USB port and presents itself to the host as an ordinary
