@@ -62,3 +62,7 @@ Treat the device as physically trusted hardware. Details in
 - [docs/DESIGN.md](docs/DESIGN.md) — how the firmware works, in depth.
 - [docs/adr/](docs/adr/) — the decisions behind it, and why.
 - [ROADMAP.md](ROADMAP.md) — what is done and what is next.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
