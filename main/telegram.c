@@ -9,8 +9,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "driver/temperature_sensor.h"
 #include "cJSON.h"
 
 #include "config.h"
@@ -29,9 +31,18 @@ static const char *TAG = "telegram";
 #define TG_RX_CAPACITY 8192
 #define TG_URL_CAPACITY 512
 
+// UTF-8 for U+00B0; a separate "C" literal follows so the escape does not
+// swallow it as another hex digit. url_encode percent-encodes it on the wire.
+#define DEGREE_SIGN "\xC2\xB0"
+
 // Set by the polling task on an authorized /wake, drained by the main task,
 // which owns all USB access. A flag is the only thing that crosses tasks.
 static atomic_bool s_wake_requested;
+
+// Internal die-temperature sensor, installed once at task start and read on
+// /status. NULL if installation failed; /status then reports temperature as
+// unavailable rather than failing.
+static temperature_sensor_handle_t s_temp_sensor;
 
 // Response accumulator filled by the HTTP event handler across ON_DATA chunks.
 typedef struct {
@@ -110,6 +121,57 @@ static bool is_command(const char *text, const char *cmd)
     return after == '\0' || after == ' ' || after == '@';
 }
 
+// Install and enable the internal temperature sensor. Best effort: on failure
+// s_temp_sensor is left NULL and /status reports temperature as unavailable.
+static void temp_sensor_init(void)
+{
+    temperature_sensor_config_t cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 80);
+    esp_err_t err = temperature_sensor_install(&cfg, &s_temp_sensor);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "temp sensor install failed: %s", esp_err_to_name(err));
+        s_temp_sensor = NULL;
+        return;
+    }
+    err = temperature_sensor_enable(s_temp_sensor);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "temp sensor enable failed: %s", esp_err_to_name(err));
+        temperature_sensor_uninstall(s_temp_sensor);
+        s_temp_sensor = NULL;
+    }
+}
+
+static bool read_chip_temp(float *out)
+{
+    return s_temp_sensor != NULL &&
+           temperature_sensor_get_celsius(s_temp_sensor, out) == ESP_OK;
+}
+
+// Format time since boot as "Dd HHh MMm SSs".
+static void format_uptime(char *buf, size_t cap)
+{
+    int64_t total = esp_timer_get_time() / 1000000; // microseconds -> seconds
+    int days = (int)(total / 86400);
+    int hours = (int)((total % 86400) / 3600);
+    int mins = (int)((total % 3600) / 60);
+    int secs = (int)(total % 60);
+    snprintf(buf, cap, "%dd %02dh %02dm %02ds", days, hours, mins, secs);
+}
+
+static void tg_send_status(esp_http_client_handle_t client, int64_t chat_id)
+{
+    char uptime[48];
+    char msg[128];
+    float temp;
+    format_uptime(uptime, sizeof(uptime));
+    if (read_chip_temp(&temp)) {
+        snprintf(msg, sizeof(msg),
+                 "RevRevRev\nuptime: %s\nchip temp: %.1f" DEGREE_SIGN "C", uptime, temp);
+    } else {
+        snprintf(msg, sizeof(msg), "RevRevRev\nuptime: %s\nchip temp: n/a", uptime);
+    }
+    tg_send_message(client, chat_id, msg);
+}
+
 static void tg_handle_command(esp_http_client_handle_t client, int64_t chat_id, const char *text)
 {
     if (is_command(text, "/wake")) {
@@ -118,8 +180,11 @@ static void tg_handle_command(esp_http_client_handle_t client, int64_t chat_id, 
         // acknowledgement's round trip.
         atomic_store(&s_wake_requested, true);
         tg_send_message(client, chat_id, "Waking the host.");
+    } else if (is_command(text, "/status")) {
+        tg_send_status(client, chat_id);
     } else if (is_command(text, "/start")) {
-        tg_send_message(client, chat_id, "RevRevRev online. Send /wake to wake the host.");
+        tg_send_message(client, chat_id,
+                        "RevRevRev online. /wake wakes the host, /status shows uptime and temperature.");
     }
     // Any other text from an authorized chat is intentionally ignored.
 }
@@ -201,6 +266,8 @@ static void tg_handle_response(esp_http_client_handle_t client, tg_rx_t *rx, int
 static void telegram_task(void *arg)
 {
     (void)arg;
+
+    temp_sensor_init();
 
     static char rx_buffer[TG_RX_CAPACITY];
     tg_rx_t rx = {

@@ -82,10 +82,11 @@ reconnects on disconnect and reflects link state on the LED.
 - **Backlog drain.** On boot the first request uses `offset=-1`, which returns
   only the latest update; the task fast-forwards `offset` past it **without
   acting**. This keeps a stale command sent before a reboot from waking the host.
-- **Commands.** `/wake` triggers a wake and replies `Waking the host.`; `/start`
-  replies with a short help line; anything else from an authorized chat is
-  ignored. The wake flag is set **before** the reply is sent, so the reply's round
-  trip cannot delay the wake.
+- **Commands.** `/wake` triggers a wake and replies `Waking the host.`;
+  `/status` replies with uptime since boot and the chip's internal
+  die temperature; `/start` replies with a short help line; anything else from an
+  authorized chat is ignored. The wake flag is set **before** the reply is sent,
+  so the reply's round trip cannot delay the wake.
 
 ## Access control
 
