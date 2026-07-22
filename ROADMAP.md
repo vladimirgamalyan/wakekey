@@ -26,6 +26,19 @@ device asking to wake.
 
 ## 2. Firmware spike — wake over USB HID
 
+**Done, 2026-07-21.** A BOOT button press wakes this host from sleep. A
+suspended bus can only be woken through `tud_remote_wakeup()`, and that call is
+a no-op unless the host has enabled remote wakeup — so the wake clears both
+concerns below on this host: it granted remote wakeup to this board (not a
+keyboard), and it tolerated the board's out-of-spec suspend current without
+cutting port power. That spike ran with WiFi off; a follow-up spike (2026-07-22)
+then held the port with WiFi up, no power save, and forced periodic TX through
+an overnight S3 sleep — no brownout, no reset (the onboard LED stayed green
+throughout), and BOOT still woke the host. So even the WiFi-up suspend load, the
+design's knowingly out-of-spec case, is tolerated on this host. (The host did
+wake once overnight, but `powercfg -lastwake` pinned that on its own Wi-Fi
+card's Wake-on-WLAN, not the device.)
+
 An ESP32-S3 that enumerates as an HID keyboard and triggers a wake on a BOOT
 button press. No WiFi, no TLS, no Telegram.
 
@@ -69,9 +82,8 @@ for not deferring this indefinitely.
 ## Open questions
 
 - Which ESP32-S3 module.
-- **Does the host sleep in S3, or in Modern Standby (S0ix)?** `powercfg /a`
-  answers it. Waking from every port with no BIOS change fits either — a desktop
-  that powers all ports in S3, or a machine that never truly leaves S0 — but the
-  answer changes what step 2 faces. Under Modern Standby the ports generally
-  stay powered and the suspend-current concern largely evaporates; under S3 it is
-  live.
+- **Does the host sleep in S3, or in Modern Standby (S0ix)?** Answered
+  2026-07-22: S3. `powercfg /a` reports Modern Standby unavailable, so the
+  suspend-current concern was the live kind, not the sort that evaporates under
+  S0ix — and the step 2 note records that the port tolerated it anyway, WiFi up.
+  Other hosts still need this check; the answer changes what they face.
