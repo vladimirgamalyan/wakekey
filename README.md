@@ -1,89 +1,64 @@
 # RevRevRev
 
-A hardware key on ESP32-S3 that wakes a sleeping computer from Telegram.
+Wake a sleeping computer from Telegram.
 
-The device is plugged into a USB port and presents itself to the host as an
-ordinary USB keyboard. On command it emits a single keypress — the same event a
-real keyboard produces — and the host wakes from sleep. The command arrives over
-Telegram, so the computer can be woken from anywhere with network access, with
-no agent software installed on the host and nothing running on it while it
-sleeps.
+An ESP32-S3 sits in a USB port and presents itself to the host as an ordinary
+keyboard. Send `/wake` to a Telegram bot and the device emits a keypress — the
+host wakes exactly as it would from a real key. No agent or driver runs on the
+host, and nothing runs on it while it sleeps.
 
-## Name
-
-The name comes from the military wake-up call "Reveille! Reveille! Reveille!" —
-traditionally announced three times over a ship's or camp's PA system to rouse
-everyone. "Rev" is short for reveille, said three times: RevRevRev. Fitting,
-since waking a sleeping host is the device's only job. See
-[ADR-0005](docs/adr/0005-rename-to-revrevrev.md).
-
-## Status
-
-Working prototype. The device wakes the host on a `/wake` command from an
-allowlisted Telegram chat. The main remaining work — runtime provisioning, to
-get credentials out of the firmware build — and the risk-ordered plan are in
-[ROADMAP.md](ROADMAP.md).
+The name is the reveille wake-up call, "Rev" three times — waking a sleeping host
+is the device's only job ([ADR-0005](docs/adr/0005-rename-to-revrevrev.md)).
 
 ## How it works
 
-1. The device connects to WiFi and polls the Telegram Bot API (`getUpdates`)
-   over HTTPS.
-2. An authorized user sends a wake command to the bot.
-3. The device emits a USB HID keypress to the host.
-4. The host wakes, exactly as it would from a physical keypress.
+1. The device joins WiFi and long-polls the Telegram Bot API over HTTPS.
+2. You send `/wake` from a chat on its allowlist.
+3. The device emits a USB HID keypress and the host wakes.
 
-Because the host sees a plain USB keyboard, waking works regardless of the
-operating system and requires no driver, service, or agent on the host side.
+Because the host sees a plain USB keyboard, this works on any OS with no
+host-side software. See [docs/DESIGN.md](docs/DESIGN.md) for how it works in
+depth.
 
-## Hardware
+## Getting started
 
-- An ESP32-S3 board with native USB (the S3's USB-OTG peripheral, not a
-  USB-to-UART bridge).
-- A host USB port that keeps power while the machine sleeps.
+You need [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) v5.x and an
+ESP32-S3 board with native USB (USB-OTG, not a USB-to-UART bridge).
 
-## Host requirements
+1. Copy the credentials template and fill it in:
+   ```sh
+   cp main/secrets.h.example main/secrets.h
+   ```
+   Set your WiFi credentials, the bot token from [@BotFather](https://t.me/BotFather),
+   and your Telegram chat ID (message the bot and read `chat.id`, or use
+   [@userinfobot](https://t.me/userinfobot)).
+2. Build and flash:
+   ```sh
+   idf.py build
+   idf.py -p PORT flash
+   ```
+3. Send `/wake` to your bot.
 
-Waking over USB must be permitted by the host — the device cannot force it:
+The host must also permit USB wake in BIOS and the OS — see
+[Host requirements](docs/DESIGN.md#host-requirements).
 
-- USB wake enabled in BIOS/UEFI (often named *Wake on USB*, *USB Power in S3/S4*,
-  or *ErP* must be disabled).
-- Windows: Device Manager → the keyboard device → Power Management → *Allow this
-  device to wake the computer*.
-- The USB port must retain power in the target sleep state. On many desktops
-  only a subset of ports does.
+## Status
 
-## Design decisions
-
-- [ADR-0001](docs/adr/0001-use-usb-hid-for-wake.md) — USB HID rather than BLE
-  HID, because Bluetooth wake support is uneven across hosts.
-- [ADR-0002](docs/adr/0002-poll-telegram-directly.md) — the device polls Telegram
-  directly rather than through a relay server, trading token exposure for having
-  no server to run.
-- [ADR-0003](docs/adr/0003-use-esp-idf-for-firmware.md) — ESP-IDF (C), for
-  direct control over TinyUSB, TLS, and NVS.
-- [ADR-0004](docs/adr/0004-compile-time-secrets-header.md) — credentials live in
-  an uncommitted header for now; runtime provisioning is the intended successor.
-- [ADR-0005](docs/adr/0005-rename-to-revrevrev.md) — renamed from WakeKey to
-  RevRevRev.
-- [ADR-0006](docs/adr/0006-stay-on-esp32s3-wifi.md) — stay on ESP32-S3 with
-  WiFi; the ~20 mA idle draw is not worth switching to a lower-power radio.
-- [ADR-0007](docs/adr/0007-verify-telegram-tls-with-cert-bundle.md) — verify the
-  Telegram TLS connection against the mbedTLS certificate bundle, not a pinned
-  certificate.
-
-Further decisions that shape structure or carry long-lived tradeoffs go in
-[`docs/adr/`](docs/adr/README.md).
+Working prototype: the device wakes the host on `/wake` from an allowlisted chat.
+The main remaining work is runtime provisioning, to get credentials out of the
+firmware build. The risk-ordered plan is in [ROADMAP.md](ROADMAP.md).
 
 ## Security
 
-Treat the device as physically trusted hardware:
+Credentials are compiled into the firmware
+([ADR-0004](docs/adr/0004-compile-time-secrets-header.md)), so do not publish
+built images or build them in CI. A Telegram bot is reachable by anyone who knows
+its username, so the chat allowlist is the only access control — keep it tight.
+Treat the device as physically trusted hardware. Details in
+[Security](docs/DESIGN.md#security).
 
-- The WiFi credentials and the Telegram bot token are compiled into the firmware
-  ([ADR-0004](docs/adr/0004-compile-time-secrets-header.md)). Anyone holding a
-  build of it, or able to dump the flash, can read them — so firmware images
-  must not be published or built in CI while this holds.
-- The bot must accept commands only from an allowlist of chat IDs. A Telegram
-  bot is reachable by anyone who knows its username, so an unrestricted bot is
-  an open wake button.
-- The device is a keyboard from the host's point of view. That is the same trust
-  boundary as leaving a keyboard plugged in.
+## Documentation
+
+- [docs/DESIGN.md](docs/DESIGN.md) — how the firmware works, in depth.
+- [docs/adr/](docs/adr/) — the decisions behind it, and why.
+- [ROADMAP.md](ROADMAP.md) — what is done and what is next.
