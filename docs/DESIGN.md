@@ -87,6 +87,12 @@ reconnects on disconnect and reflects link state on the LED.
   die temperature; `/start` replies with a short help line; anything else from an
   authorized chat is ignored. The wake flag is set **before** the reply is sent,
   so the reply's round trip cannot delay the wake.
+- **Liveness watchdog.** A completed `getUpdates` (HTTP 200) is the device's
+  liveness signal. If contact with Telegram is lost for too long — a wall-clock
+  silence window, or enough back-to-back failures — the poll loop calls
+  `esp_restart()`, since an unattended remote device cannot be power-cycled by
+  hand ([ADR-0008](adr/0008-reboot-on-lost-telegram-contact.md)). Thresholds are
+  in `main/watchdog.h`.
 
 ## Access control
 
@@ -189,3 +195,4 @@ The reasoning behind these choices lives in the ADRs:
 - [ADR-0005](adr/0005-rename-to-revrevrev.md) — the RevRevRev name.
 - [ADR-0006](adr/0006-stay-on-esp32s3-wifi.md) — stay on ESP32-S3 with WiFi.
 - [ADR-0007](adr/0007-verify-telegram-tls-with-cert-bundle.md) — verify TLS with the certificate bundle.
+- [ADR-0008](adr/0008-reboot-on-lost-telegram-contact.md) — reboot on lost Telegram contact.

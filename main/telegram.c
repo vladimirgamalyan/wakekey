@@ -10,12 +10,14 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "driver/temperature_sensor.h"
 #include "cJSON.h"
 
 #include "config.h"
+#include "watchdog.h"
 
 static const char *TAG = "telegram";
 
@@ -263,6 +265,34 @@ static void tg_handle_response(esp_http_client_handle_t client, tg_rx_t *rx, int
     cJSON_Delete(root);
 }
 
+// Liveness watchdog for the poll loop (ADR-0008). The device is unattended and
+// remote, so a silent wedge in the network stack or this loop is unrecoverable
+// without a reboot. Contact with Telegram — a getUpdates that returns HTTP 200 —
+// is the liveness signal; losing it for too long triggers esp_restart().
+typedef struct {
+    int consecutive_failures;
+    int64_t last_success_us;
+} tg_watchdog_t;
+
+static void tg_watchdog_note_success(tg_watchdog_t *wd)
+{
+    wd->consecutive_failures = 0;
+    wd->last_success_us = esp_timer_get_time();
+}
+
+static void tg_watchdog_note_failure(tg_watchdog_t *wd)
+{
+    wd->consecutive_failures++;
+    int64_t silence_us = esp_timer_get_time() - wd->last_success_us;
+    bool too_many = wd->consecutive_failures >= TG_WATCHDOG_MAX_CONSECUTIVE_FAILURES;
+    bool too_long = silence_us >= (int64_t)TG_WATCHDOG_MAX_SILENCE_SECONDS * 1000000;
+    if (too_many || too_long) {
+        ESP_LOGE(TAG, "Watchdog: no Telegram contact for %llds over %d consecutive failures; restarting",
+                 (long long)(silence_us / 1000000), wd->consecutive_failures);
+        esp_restart();
+    }
+}
+
 static void telegram_task(void *arg)
 {
     (void)arg;
@@ -297,6 +327,9 @@ static void telegram_task(void *arg)
     // The same request path retries through the backoff until WiFi is up.
     bool primed = false;
 
+    // Seed last-success at boot so the silence window counts from now, not from 0.
+    tg_watchdog_t wd = { .last_success_us = esp_timer_get_time() };
+
     ESP_LOGI(TAG, "Polling Telegram getUpdates");
     while (1) {
         if (primed) {
@@ -317,15 +350,19 @@ static void telegram_task(void *arg)
         if (err != ESP_OK) {
             // Also the expected path until WiFi has an IP: back off and retry.
             ESP_LOGW(TAG, "getUpdates failed: %s (backing off)", esp_err_to_name(err));
+            tg_watchdog_note_failure(&wd);
             vTaskDelay(pdMS_TO_TICKS(TG_BACKOFF_MS));
             continue;
         }
         int status = esp_http_client_get_status_code(client);
         if (status != 200) {
             ESP_LOGW(TAG, "getUpdates HTTP %d (backing off)", status);
+            tg_watchdog_note_failure(&wd);
             vTaskDelay(pdMS_TO_TICKS(TG_BACKOFF_MS));
             continue;
         }
+        // A 200 is a completed round trip to Telegram: the loop is alive.
+        tg_watchdog_note_success(&wd);
         if (rx.overflow) {
             // A truncated body cannot be parsed to learn its update_id, so
             // advance past the requested offset to avoid stalling on it. With
